@@ -43,10 +43,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Resume Builder API", version="1.0.0", lifespan=lifespan)
 
-# CORS middleware – mirrors Express cors() config
+# CORS middleware – allow one or more client origins.
+# Read `CLIENT_URL` from env; support comma-separated values for multiple
+# client hosts (e.g. `http://localhost:5173,https://rb-client.vercel.app`).
+_origins_env = os.getenv("CLIENT_URL", "http://localhost:5173")
+_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+# Ensure common deployment URL is allowed (helpful when CLIENT_URL wasn't set)
+if "https://rb-client.vercel.app" not in _origins:
+    _origins.append("https://rb-client.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CLIENT_URL", "http://localhost:5173")],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
