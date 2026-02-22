@@ -16,9 +16,29 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await connect_db()
-    yield
-    await disconnect_db()
+    # Connect to DB but don't fail the whole app startup if connection fails.
+    # Some hosting environments can cause transient TLS/network errors during
+    # startup; allow the app to start so the process binds the port and logs
+    # the underlying error for debugging.
+    _connected = False
+    try:
+        await connect_db()
+        _connected = True
+    except Exception as exc:
+        # Print full traceback to logs so Render/hosting shows the root cause.
+        import traceback
+
+        print("Warning: failed to connect to MongoDB during startup:", exc)
+        traceback.print_exc()
+
+    try:
+        yield
+    finally:
+        if _connected:
+            try:
+                await disconnect_db()
+            except Exception:
+                pass
 
 
 app = FastAPI(title="Resume Builder API", version="1.0.0", lifespan=lifespan)
