@@ -133,7 +133,10 @@ async def create_resume(
     body: CreateResumeRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     template = body.selectedTemplate if body.selectedTemplate in VALID_TEMPLATES else "classic"
@@ -167,7 +170,10 @@ async def create_resume(
 
 @router.get("/")
 async def get_resumes(user_id: str = Depends(get_current_user_id)):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     cursor = resumes.find({"userId": ObjectId(user_id)})
@@ -180,7 +186,10 @@ async def get_resume(
     resume_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     oid = _parse_object_id(resume_id)
@@ -200,7 +209,10 @@ async def update_resume(
     body: UpdateResumeRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     oid = _parse_object_id(resume_id)
@@ -240,7 +252,10 @@ async def delete_resume(
     resume_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     oid = _parse_object_id(resume_id)
@@ -261,7 +276,10 @@ async def download_resume(
     format: str = Query(default="pdf"),
     user_id: str = Depends(get_current_user_id),
 ):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
 
     oid = _parse_object_id(resume_id)

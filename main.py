@@ -1,15 +1,22 @@
 import os
+import traceback
 from contextlib import asynccontextmanager
 
+# load_dotenv() MUST run before any app.* imports so that modules which read
+# env vars at import time (e.g. JWT_SECRET in auth.py / auth_routes.py) pick
+# up the values from .env.
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-from app.config.database import connect_db, disconnect_db
-from app.routes.auth_routes import router as auth_router
-from app.routes.convert_routes import router as convert_router
-from app.routes.resume_routes import router as resume_router
+load_dotenv()
+
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+
+from app.config.database import connect_db, disconnect_db  # noqa: E402
+from app.routes.auth_routes import router as auth_router  # noqa: E402
+from app.routes.convert_routes import router as convert_router  # noqa: E402
+from app.routes.resume_routes import router as resume_router  # noqa: E402
 
 load_dotenv()
 
@@ -73,6 +80,12 @@ async def health_check():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Don't swallow HTTPException – let FastAPI handle it with the correct status code
+    if isinstance(exc, HTTPException):
+        raise exc
+    # Log the real error so it's visible in Render / hosting logs
+    print(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    traceback.print_exc()
     return JSONResponse(status_code=500, content={"message": "Internal server error"})
 
 

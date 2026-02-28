@@ -73,7 +73,10 @@ def _serialize_user(doc: dict) -> dict:
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @router.post("/register", status_code=201)
 async def register(body: RegisterRequest):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     users = db["users"]
 
     # Check duplicate email
@@ -106,7 +109,10 @@ async def register(body: RegisterRequest):
 
 @router.post("/login")
 async def login(body: LoginRequest):
-    db = get_db()
+    try:
+        db = get_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
     users = db["users"]
 
     user_doc = await users.find_one({"email": body.email.lower()})
