@@ -18,8 +18,6 @@ from app.routes.auth_routes import router as auth_router  # noqa: E402
 from app.routes.convert_routes import router as convert_router  # noqa: E402
 from app.routes.resume_routes import router as resume_router  # noqa: E402
 
-load_dotenv()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
