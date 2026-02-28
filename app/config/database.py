@@ -4,6 +4,7 @@ Async MongoDB connection using Motor – mirrors src/config/database.ts (Mongoos
 import os
 from urllib.parse import urlparse
 
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 _client: AsyncIOMotorClient | None = None
@@ -16,17 +17,20 @@ async def connect_db() -> None:
     mongo_uri = os.getenv(
         "MONGODB_URI", "mongodb://localhost:27017/resume_builder"
     )
-    print(f"Connecting to MongoDB... {mongo_uri}")
+    print(f"Connecting to MongoDB...")
 
-    _client = AsyncIOMotorClient(mongo_uri)
+    # Use certifi CA bundle so MongoDB Atlas TLS works on all platforms
+    _client = AsyncIOMotorClient(mongo_uri, tlsCAFile=certifi.where())
 
     # Derive the database name from the URI path (e.g. /resume_builder_db)
     parsed = urlparse(mongo_uri)
     db_name = parsed.path.lstrip("/").split("?")[0] or "resume_builder"
-    _db = _client[db_name]
 
-    # Ping to verify the connection
+    # Ping to verify the connection BEFORE setting _db.
+    # If ping fails, _db stays None so get_db() raises RuntimeError
+    # and routes return 503 instead of crashing with 500.
     await _client.admin.command("ping")
+    _db = _client[db_name]
     print("MongoDB connected successfully")
 
 
