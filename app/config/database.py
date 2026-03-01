@@ -1,6 +1,12 @@
 """
 Async MongoDB connection using Motor – mirrors src/config/database.ts (Mongoose).
+
+Requires:
+  - motor, pymongo
+  - dnspython          (for mongodb+srv:// SRV DNS resolution)
+  - certifi            (for Atlas TLS CA bundle)
 """
+import asyncio
 import os
 from urllib.parse import urlparse
 
@@ -10,6 +16,10 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 _client: AsyncIOMotorClient | None = None
 _db: AsyncIOMotorDatabase | None = None
 
+# Retry settings for first connection (Render cold‑start can be slow)
+_MAX_RETRIES = 3
+_RETRY_DELAY_S = 2
+
 
 async def connect_db() -> None:
     global _client, _db
@@ -17,21 +27,40 @@ async def connect_db() -> None:
     mongo_uri = os.getenv(
         "MONGODB_URI", "mongodb://localhost:27017/resume_builder"
     )
-    print(f"Connecting to MongoDB...")
+    # Mask credentials in log output
+    print(f"Connecting to MongoDB... (uri starts with {mongo_uri[:25]}...)")
 
-    # Use certifi CA bundle so MongoDB Atlas TLS works on all platforms
-    _client = AsyncIOMotorClient(mongo_uri, tlsCAFile=certifi.where())
+    # Use certifi CA bundle so MongoDB Atlas TLS works on all platforms.
+    # serverSelectionTimeoutMS keeps startup from hanging forever.
+    _client = AsyncIOMotorClient(
+        mongo_uri,
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=10_000,
+    )
 
     # Derive the database name from the URI path (e.g. /resume_builder_db)
     parsed = urlparse(mongo_uri)
     db_name = parsed.path.lstrip("/").split("?")[0] or "resume_builder"
 
-    # Ping to verify the connection BEFORE setting _db.
-    # If ping fails, _db stays None so get_db() raises RuntimeError
-    # and routes return 503 instead of crashing with 500.
-    await _client.admin.command("ping")
-    _db = _client[db_name]
-    print("MongoDB connected successfully")
+    # Ping with retries – transient DNS / TLS errors are common on
+    # Render’s free tier during cold starts.
+    last_err: Exception | None = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            await _client.admin.command("ping")
+            _db = _client[db_name]
+            print(f"MongoDB connected successfully (attempt {attempt})")
+            return
+        except Exception as exc:
+            last_err = exc
+            print(f"MongoDB ping attempt {attempt}/{_MAX_RETRIES} failed: {exc}")
+            if attempt < _MAX_RETRIES:
+                await asyncio.sleep(_RETRY_DELAY_S)
+
+    # All retries exhausted – raise so lifespan logs the traceback
+    raise RuntimeError(
+        f"Could not connect to MongoDB after {_MAX_RETRIES} attempts: {last_err}"
+    )
 
 
 async def disconnect_db() -> None:
