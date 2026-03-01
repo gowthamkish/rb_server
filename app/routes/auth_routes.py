@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from jose import jwt
 from pydantic import BaseModel, field_validator
 
-from app.config.database import get_db
+from app.config.database import ensure_db
 
 router = APIRouter()
 
@@ -74,7 +74,7 @@ def _serialize_user(doc: dict) -> dict:
 @router.post("/register", status_code=201)
 async def register(body: RegisterRequest):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     users = db["users"]
@@ -110,7 +110,7 @@ async def register(body: RegisterRequest):
 @router.post("/login")
 async def login(body: LoginRequest):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     users = db["users"]

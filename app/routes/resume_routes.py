@@ -20,7 +20,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.config.database import get_db
+from app.config.database import ensure_db
 from app.middleware.auth import get_current_user_id
 
 router = APIRouter()
@@ -134,7 +134,7 @@ async def create_resume(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
@@ -171,7 +171,7 @@ async def create_resume(
 @router.get("/")
 async def get_resumes(user_id: str = Depends(get_current_user_id)):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
@@ -187,7 +187,7 @@ async def get_resume(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
@@ -210,7 +210,7 @@ async def update_resume(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
@@ -253,7 +253,7 @@ async def delete_resume(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]
@@ -277,7 +277,7 @@ async def download_resume(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
-        db = get_db()
+        db = await ensure_db()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database not connected")
     resumes = db["resumes"]

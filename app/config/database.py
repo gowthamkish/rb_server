@@ -70,7 +70,26 @@ async def disconnect_db() -> None:
         print("MongoDB connection closed")
 
 
+async def ensure_db() -> AsyncIOMotorDatabase:
+    """Return the database handle, reconnecting lazily if needed.
+
+    On Render free-tier the startup connection often fails due to transient
+    TLS / network errors during cold-start.  Instead of staying broken for
+    the whole process lifetime, this helper retries the connection on every
+    request that needs the DB until it succeeds.
+    """
+    global _db
+    if _db is not None:
+        return _db
+    # Attempt a (re-)connection
+    await connect_db()
+    if _db is None:
+        raise RuntimeError("Database not initialised – connect_db() did not set _db")
+    return _db
+
+
 def get_db() -> AsyncIOMotorDatabase:
+    """Synchronous accessor – kept for backward compat but prefer ensure_db()."""
     if _db is None:
         raise RuntimeError("Database not initialised – call connect_db() first")
     return _db
