@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 from app.config.database import connect_db, disconnect_db  # noqa: E402
 from app.routes.auth_routes import router as auth_router  # noqa: E402
 from app.routes.convert_routes import router as convert_router  # noqa: E402
+from app.routes.parse_resume_routes import router as parse_resume_router  # noqa: E402
 from app.routes.resume_routes import router as resume_router  # noqa: E402
 
 
@@ -69,6 +70,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(resume_router, prefix="/api/resumes", tags=["resumes"])
 app.include_router(convert_router, prefix="/api/convert", tags=["convert"])
+app.include_router(parse_resume_router, prefix="/api/parse-resume", tags=["parse-resume"])
 
 
 @app.get("/health")

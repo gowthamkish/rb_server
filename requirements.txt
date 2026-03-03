@@ -8,6 +8,10 @@ python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.0
 python-multipart>=0.0.12
 python-docx>=1.1.2
+pdfplumber>=0.11.0
+pypdf>=5.0.0
+pymupdf>=1.24.0
+# System dependency for .doc (Word 97-2003) parsing: apt-get install -y antiword
 python-dotenv>=1.0.1
 gunicorn>=20.1.0
 certifi>=2024.0.0
