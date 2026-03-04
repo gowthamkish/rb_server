@@ -18,9 +18,12 @@ from email.mime.text import MIMEText
 import aiosmtplib
 import bcrypt
 
-from fastapi import APIRouter, HTTPException
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel, field_validator
+
+from app.middleware.auth import get_current_user_id
 
 from app.config.database import ensure_db
 
@@ -68,11 +71,17 @@ def _create_token(user_id: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+FREE_TEMPLATES = {"classic", "modern", "ats"}
+PREMIUM_TEMPLATES = {"creative", "minimal", "executive", "sleek", "colorful", "timeline"}
+ALL_TEMPLATES = FREE_TEMPLATES | PREMIUM_TEMPLATES
+
+
 def _serialize_user(doc: dict) -> dict:
     return {
         "id": str(doc["_id"]),
         "name": doc["name"],
         "email": doc["email"],
+        "plan": doc.get("plan", "free"),
     }
 
 
@@ -98,6 +107,7 @@ async def register(body: RegisterRequest):
             "name": body.name.strip(),
             "email": body.email.lower(),
             "password": hashed,
+            "plan": "free",
             "createdAt": now,
             "updatedAt": now,
         }
@@ -219,6 +229,68 @@ class ResetPasswordRequest(BaseModel):
 
 
 # ── Forgot-password route ──────────────────────────────────────────────────────
+
+# ── Profile & subscription routes ─────────────────────────────────────────────
+
+@router.get("/me")
+async def get_me(user_id: str = Depends(get_current_user_id)):
+    """Return the current user's profile including their plan."""
+    try:
+        db = await ensure_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    users = db["users"]
+
+    user_doc = await users.find_one({"_id": ObjectId(user_id)})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"user": _serialize_user(user_doc)}
+
+
+@router.post("/upgrade-plan")
+async def upgrade_plan(user_id: str = Depends(get_current_user_id)):
+    """
+    Upgrade the current user's plan to 'premium'.
+    In production this endpoint would be called after a successful
+    payment webhook. For now it upgrades immediately (mock).
+    """
+    try:
+        db = await ensure_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    users = db["users"]
+
+    user_doc = await users.find_one({"_id": ObjectId(user_id)})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"plan": "premium", "updatedAt": datetime.now(timezone.utc)}},
+    )
+    updated = await users.find_one({"_id": ObjectId(user_id)})
+    return {"message": "Plan upgraded to premium", "user": _serialize_user(updated)}
+
+
+@router.post("/downgrade-plan")
+async def downgrade_plan(user_id: str = Depends(get_current_user_id)):
+    """Downgrade the current user back to the free plan."""
+    try:
+        db = await ensure_db()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    users = db["users"]
+
+    await users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"plan": "free", "updatedAt": datetime.now(timezone.utc)}},
+    )
+    updated = await users.find_one({"_id": ObjectId(user_id)})
+    return {"message": "Plan downgraded to free", "user": _serialize_user(updated)}
+
+
+# ── Forgot / Reset password helpers ────────────────────────────────────────────
 
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):

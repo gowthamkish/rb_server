@@ -25,8 +25,29 @@ from app.middleware.auth import get_current_user_id
 
 router = APIRouter()
 
-VALID_TEMPLATES = {"classic", "modern", "creative", "minimal", "ats", "executive"}
+VALID_TEMPLATES = {"classic", "modern", "creative", "minimal", "ats", "executive", "sleek", "colorful", "timeline"}
+FREE_TEMPLATES = {"classic", "modern", "ats"}
+PREMIUM_TEMPLATES = {"creative", "minimal", "executive", "sleek", "colorful", "timeline"}
 VALID_SKILL_LEVELS = {"Beginner", "Intermediate", "Advanced", "Expert"}
+
+
+async def _get_user_plan(db: Any, user_id: str) -> str:
+    """Return the plan ('free' or 'premium') for the given user_id."""
+    users = db["users"]
+    doc = await users.find_one({"_id": ObjectId(user_id)})
+    return doc.get("plan", "free") if doc else "free"
+
+
+def _check_template_access(template: str, plan: str) -> None:
+    """Raise 403 if a free-plan user attempts to use a premium template."""
+    if template in PREMIUM_TEMPLATES and plan != "premium":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Template '{template}' requires a Premium plan. "
+                "Please upgrade to access premium templates."
+            ),
+        )
 
 
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
@@ -140,6 +161,10 @@ async def create_resume(
     resumes = db["resumes"]
 
     template = body.selectedTemplate if body.selectedTemplate in VALID_TEMPLATES else "classic"
+
+    # Enforce plan-based template access
+    user_plan = await _get_user_plan(db, user_id)
+    _check_template_access(template, user_plan)
     now = datetime.now(timezone.utc)
 
     personal_info = body.personalInfo if body.personalInfo else {}
@@ -237,6 +262,9 @@ async def update_resume(
         update_fields["skills"] = [_model_to_dict(s) for s in body.skills]
     if body.selectedTemplate is not None:
         update_fields["selectedTemplate"] = body.selectedTemplate
+        # Enforce plan-based template access on update too
+        user_plan = await _get_user_plan(db, user_id)
+        _check_template_access(body.selectedTemplate, user_plan)
 
     await resumes.update_one({"_id": oid}, {"$set": update_fields})
     updated = await resumes.find_one({"_id": oid})
