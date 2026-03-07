@@ -156,7 +156,59 @@ def _clean_bullet(text: str) -> str:
 
 
 def _normalise_date(date_str: str) -> str:
-    return date_str.strip()
+    """
+    Convert various date formats into ISO-ish YYYY-MM-DD for front-end
+    DatePicker compatibility.
+
+    Handles:
+      "Jan 2025"        → "2025-01-01"
+      "January 2025"    → "2025-01-01"
+      "May 2022"        → "2022-05-01"
+      "05/2024"         → "2024-05-01"
+      "2012"            → "2012-01-01"
+      "July 2018"       → "2018-07-01"
+    """
+    raw = date_str.strip()
+    if not raw:
+        return ""
+
+    _MONTH_MAP = {
+        "jan": "01", "january": "01",
+        "feb": "02", "february": "02",
+        "mar": "03", "march": "03",
+        "apr": "04", "april": "04",
+        "may": "05",
+        "jun": "06", "june": "06",
+        "jul": "07", "july": "07",
+        "aug": "08", "august": "08",
+        "sep": "09", "sept": "09", "september": "09",
+        "oct": "10", "october": "10",
+        "nov": "11", "november": "11",
+        "dec": "12", "december": "12",
+    }
+
+    # "Jan 2025", "January 2025", "Jan. 2025"
+    m = re.match(r"^([A-Za-z]+)\.?\s+(\d{4})$", raw)
+    if m:
+        month_str = m.group(1).lower()
+        month_num = _MONTH_MAP.get(month_str, "01")
+        return f"{m.group(2)}-{month_num}-01"
+
+    # "05/2024", "5/2024"
+    m = re.match(r"^(\d{1,2})/(\d{4})$", raw)
+    if m:
+        return f"{m.group(2)}-{int(m.group(1)):02d}-01"
+
+    # Pure year "2012"
+    m = re.match(r"^(\d{4})$", raw)
+    if m:
+        return f"{m.group(1)}-01-01"
+
+    # Already ISO-like "2025-01-01"
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
+
+    return raw
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -207,6 +259,7 @@ def _extract_personal_info(
     phone = ""
     full_name = ""
     location = ""
+    address_parts: list[str] = []
 
     # Grab first email / phone from entire document
     em = _EMAIL_RE.search(full_text)
@@ -224,7 +277,7 @@ def _extract_personal_info(
     if personal_details_lines:
         first_name = ""
         last_name = ""
-        address_parts: list[str] = []
+        address_parts.clear()
         collecting_address = False
         _PD_KEY_RE = re.compile(
             r"^(?:first|last|middle)\s+name|date\s+of\s+birth|languages?|residence|address|city|nationality|gender",
@@ -349,6 +402,42 @@ def _extract_personal_info(
             if re.match(r"[A-Za-z ]+,\s*[A-Za-z ]+", candidate) and not _EMAIL_RE.search(candidate):
                 location = candidate
                 break
+
+    # Build a richer location string from the address parts when available
+    if location and personal_details_lines:
+        # Try to build a more complete location: "City, State/District, PIN"
+        if address_parts:
+            full_addr = ", ".join(address_parts) if isinstance(address_parts, list) else str(address_parts)
+            # Extract city, district, and PIN from the full address
+            addr_tokens = [p.strip().rstrip(",") for p in full_addr.split(",")]
+            city = ""
+            district = ""
+            pin = ""
+            for part in addr_tokens:
+                part = part.strip()
+                if not part:
+                    continue
+                # PIN code
+                pin_m = re.search(r"\b(\d{5,6})\b", part)
+                if pin_m:
+                    pin = pin_m.group(1)
+                    part = re.sub(r"\b\d{5,6}\b", "", part).strip().strip("–—-").strip()
+                    if part and part != location:
+                        district = part
+                    continue
+                # Skip house/plot numbers and street names
+                if re.match(r"^\d", part):
+                    continue
+                if re.search(r"\b(?:street|road|nagar|colony|lane|cross|main|block|plot|flat|apt)\b", part, re.I):
+                    continue
+                if not city:
+                    city = part
+                elif part != city:
+                    district = part
+            # Build location: "City, District, PIN" or "City, PIN"
+            loc_parts = [p for p in [city or location, district, pin] if p]
+            if len(loc_parts) > 1:
+                location = ", ".join(loc_parts)
 
     return {
         "fullName": full_name,
@@ -522,8 +611,7 @@ def _extract_experiences(section_lines: list[str]) -> list[dict[str, Any]]:
             right = parts[1].strip() if len(parts) > 1 else ""
             if _TITLE_WORDS_RE.search(left):
                 job_title = left
-                # Company may include parenthetical domain: "NIUM (FinTech Domain)"
-                company = re.sub(r"\s*\([^)]{1,60}\)\s*$", "", right).strip() or right
+                company = right
             else:
                 job_title = left
                 company = right
@@ -595,7 +683,16 @@ def _extract_experiences(section_lines: list[str]) -> list[dict[str, Any]]:
 
         job_title = job_title.strip("|–—-,").strip()
         company = company.strip("|–—-,").strip()
+        # Ensure space before parenthetical domain: "CompanyName(DOMAIN)" → "CompanyName (DOMAIN)"
+        company = re.sub(r"(\w)\(", r"\1 (", company)
         merged_desc = _merge_wrapped_lines(desc_parts)
+
+        # Skip entries that look like personal projects (not professional experience)
+        if re.search(r"\bpersonal\s+project\b", job_title, re.I) and not company and not start_date:
+            continue
+        # Skip entries with no meaningful content
+        if not job_title and not company:
+            continue
 
         if job_title or company:
             experiences.append(
@@ -838,6 +935,15 @@ _SKILL_NOISE_RE = re.compile(
     re.I,
 )
 
+# Common Canva / template placeholder skills that should be filtered out
+_CANVA_TEMPLATE_SKILLS = {
+    "visual design", "process flows", "storyboards", "ui/ux",
+    "user flows", "wireframes", "prototyping", "user research",
+    "design thinking", "figma", "sketch", "adobe xd",
+    "information architecture", "interaction design",
+    # Add more known Canva defaults as they are discovered
+}
+
 
 def _extract_skills(section_lines: list[str]) -> list[dict[str, str]]:
     skills: list[dict[str, str]] = []
@@ -900,10 +1006,71 @@ def _extract_skills(section_lines: list[str]) -> list[dict[str, str]]:
             # Skip items that are clearly NOT skills (long sentences, pure punctuation)
             if len(token) < 2:
                 continue
+            # Skip known Canva / template placeholder skills
+            if token.lower() in _CANVA_TEMPLATE_SKILLS:
+                continue
             seen.add(token.lower())
             skills.append({"id": _uid(), "name": token, "level": level})
 
     return skills
+
+
+# ────────────────────────────────────────────────────────────────────
+# 7. LANGUAGES
+# ────────────────────────────────────────────────────────────────────
+
+_LANG_LINE_RE = re.compile(
+    r"languages?\s*[:\-–]\s*(.+)", re.I
+)
+
+def _extract_languages(
+    lang_section_lines: list[str],
+    personal_details_lines: list[str] | None,
+) -> list[dict[str, str]]:
+    """Extract languages from the languages section or personal details.
+
+    Sources checked (in priority order):
+    1. Dedicated "Languages" section  → already split by _split_sections
+    2. "Language : X, Y" line inside PERSONAL DETAILS section
+    """
+    raw_names: list[str] = []
+
+    # Source 1: dedicated languages section
+    for line in lang_section_lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Skip the heading itself
+        if re.match(r"^languages?\s*:?\s*$", line, re.I):
+            continue
+        # Might be comma-separated: "English, Tamil, Hindi"
+        for chunk in re.split(r"[,;/|]", line):
+            chunk = chunk.strip().strip("•–-").strip()
+            if chunk and len(chunk) < 40:
+                raw_names.append(chunk)
+
+    # Source 2: personal details "Languages : ..." line
+    if not raw_names and personal_details_lines:
+        for line in personal_details_lines:
+            m = _LANG_LINE_RE.match(line.strip())
+            if m:
+                for chunk in re.split(r"[,;/|]", m.group(1)):
+                    chunk = chunk.strip().strip("•–-").strip()
+                    if chunk and len(chunk) < 40:
+                        raw_names.append(chunk)
+                break
+
+    # Deduplicate and build result
+    seen: set[str] = set()
+    languages: list[dict[str, str]] = []
+    for name in raw_names:
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        languages.append({"id": _uid(), "name": name, "level": "Intermediate"})
+
+    return languages
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -957,9 +1124,16 @@ def parse_resume_text(text: str) -> dict[str, Any]:
     # Deduplicate across multiple "Skills" occurrences (page 1 real + page 2 template)
     skills = _extract_skills(sections.get("skills", []))
 
+    # ── Languages ──────────────────────────────────────────────────────
+    languages = _extract_languages(
+        sections.get("languages", []),
+        sections.get("personal_details"),
+    )
+
     return {
         "personalInfo": personal,
         "experiences": experiences,
         "education": education,
         "skills": skills,
+        "languages": languages,
     }
